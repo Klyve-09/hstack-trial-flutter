@@ -1,3 +1,7 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../data/items_repository.dart';
@@ -16,6 +20,10 @@ class _ComposeScreenState extends State<ComposeScreen> {
   final _formKey = GlobalKey<FormState>();
   final _title = TextEditingController();
   final _body = TextEditingController();
+  final _notes = TextEditingController();
+  final _picker = ImagePicker();
+  XFile? _labelPhoto;
+  bool _scanning = false;
   bool _saving = false;
   String? _error;
 
@@ -23,7 +31,38 @@ class _ComposeScreenState extends State<ComposeScreen> {
   void dispose() {
     _title.dispose();
     _body.dispose();
+    _notes.dispose();
     super.dispose();
+  }
+
+  bool get _canScan =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS);
+
+  Future<void> _scanLabel() async {
+    if (_saving || _scanning) return;
+    setState(() {
+      _scanning = true;
+      _error = null;
+    });
+    try {
+      final photo = await _picker.pickImage(
+        source: ImageSource.camera,
+        maxWidth: 1600,
+        imageQuality: 85,
+        requestFullMetadata: false,
+      );
+      if (mounted && photo != null) {
+        setState(() => _labelPhoto = photo);
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _error = 'Could not open the camera. Please try again.');
+      }
+    } finally {
+      if (mounted) setState(() => _scanning = false);
+    }
   }
 
   Future<void> _save() async {
@@ -54,9 +93,17 @@ class _ComposeScreenState extends State<ComposeScreen> {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: !_saving,
+      canPop: !_saving && !_scanning,
       child: Scaffold(
-        appBar: AppBar(title: const Text('New item')),
+        appBar: AppBar(
+          title: const Text('New item'),
+          actions: [
+            IconButton(
+              onPressed: _canScan && !_saving && !_scanning ? _scanLabel : null,
+              icon: const Icon(Icons.document_scanner_outlined),
+            ),
+          ],
+        ),
         body: Align(
           alignment: Alignment.topCenter,
           child: ConstrainedBox(
@@ -77,6 +124,33 @@ class _ComposeScreenState extends State<ComposeScreen> {
                     validator: (value) => value == null || value.trim().isEmpty
                         ? 'Enter a title.'
                         : null,
+                  ),
+                  const SizedBox(height: 20),
+                  if (_scanning) ...[
+                    const SizedBox(height: 12),
+                    const LinearProgressIndicator(),
+                  ],
+                  if (_labelPhoto != null) ...[
+                    const SizedBox(height: 12),
+                    Image.file(
+                      File(_labelPhoto!.path),
+                      height: 180,
+                      fit: BoxFit.contain,
+                      semanticLabel: 'Captured label',
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                  TextFormField(
+                    controller: _notes,
+                    enabled: !_saving && !_scanning,
+                    decoration: const InputDecoration(
+                      labelText: 'Notes',
+                      hintText: 'Jot down details from the label',
+                      border: OutlineInputBorder(),
+                    ),
+                    minLines: 2,
+                    maxLines: null,
+                    textCapitalization: TextCapitalization.sentences,
                   ),
                   const SizedBox(height: 20),
                   TextFormField(
@@ -104,7 +178,7 @@ class _ComposeScreenState extends State<ComposeScreen> {
                   ],
                   const SizedBox(height: 24),
                   FilledButton.icon(
-                    onPressed: _saving ? null : _save,
+                    onPressed: _saving || _scanning ? null : _save,
                     icon: const Icon(Icons.save_outlined),
                     label: Text(_saving ? 'Saving…' : 'Save item'),
                   ),
