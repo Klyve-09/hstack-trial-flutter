@@ -4,7 +4,10 @@ A small notebook built with Flutter. Write a title and body, browse your notes
 newest first, and open a note to read its full text and creation time.
 
 The app has three screens: the items list, item detail, and a form for a new
-item. Both title and body are required. Back leaves the form without saving.
+item. Both title and body are required. Back leaves the form without saving and
+discards its draft.
+While you type, the draft is stored locally. Reopening the app after it is
+terminated restores the form and its text; saving clears the draft.
 Notes are stored only on your device; there are no accounts or network services.
 
 ## Requirements
@@ -45,7 +48,8 @@ dart format --set-exit-if-changed .
 ```
 
 Tests cover JSON persistence, invalid stored data, creating and reading notes,
-required fields, leaving without saving, and storage error handling. The project
+required fields, draft restoration after a simulated restart, clearing drafts,
+leaving without saving, and storage error handling. The project
 keeps the generated `flutter_lints` configuration.
 
 ## Local data
@@ -53,6 +57,10 @@ keeps the generated `flutter_lints` configuration.
 `ItemsRepository` stores one JSON-encoded list under the `items` preference key
 using `shared_preferences`. Each entry contains `title`, `body`, and `createdAt`
 (an ISO 8601 UTC timestamp). Times are shown in the device's local time zone.
+
+The separate `draft` preference key holds one JSON object with the raw `title`
+and `body` text. Blank drafts are removed, unreadable drafts are ignored, and
+draft operations do not change the `items` key.
 
 The plugin uses the application's local preferences: a JSON preferences file in
 the Linux application support directory, Android SharedPreferences, or iOS

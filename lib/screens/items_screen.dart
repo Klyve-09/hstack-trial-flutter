@@ -1,14 +1,20 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../data/items_repository.dart';
+import '../data/draft_repository.dart';
 import '../models/item.dart';
 import 'compose_screen.dart';
 import 'item_detail_screen.dart';
 
 class ItemsScreen extends StatefulWidget {
-  const ItemsScreen({super.key, required this.repository});
+  const ItemsScreen({
+    super.key,
+    required this.repository,
+    required this.draftRepository,
+  });
 
   final ItemsRepository repository;
+  final DraftRepository draftRepository;
 
   @override
   State<ItemsScreen> createState() => _ItemsScreenState();
@@ -16,11 +22,13 @@ class ItemsScreen extends StatefulWidget {
 
 class _ItemsScreenState extends State<ItemsScreen> {
   late Future<List<Item>> _items;
+  bool _openingCompose = false;
 
   @override
   void initState() {
     super.initState();
     _items = widget.repository.load();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _restoreDraft());
   }
 
   void _reload() {
@@ -29,13 +37,30 @@ class _ItemsScreenState extends State<ItemsScreen> {
     });
   }
 
-  Future<void> _compose() async {
-    final saved = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (_) => ComposeScreen(repository: widget.repository),
-      ),
-    );
-    if (saved == true && mounted) _reload();
+  Future<void> _restoreDraft() async {
+    final draft = await widget.draftRepository.load();
+    if (mounted && draft != null) await _compose(draft);
+  }
+
+  Future<void> _compose([Draft? initialDraft]) async {
+    if (_openingCompose) return;
+    _openingCompose = true;
+    try {
+      final draft = initialDraft ?? await widget.draftRepository.load();
+      if (!mounted) return;
+      final saved = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(
+          builder: (_) => ComposeScreen(
+            repository: widget.repository,
+            draftRepository: widget.draftRepository,
+            initialDraft: draft,
+          ),
+        ),
+      );
+      if (saved == true && mounted) _reload();
+    } finally {
+      _openingCompose = false;
+    }
   }
 
   @override
