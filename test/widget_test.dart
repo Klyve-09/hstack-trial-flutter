@@ -13,8 +13,109 @@ class FailingRepository extends ItemsRepository {
   Future<void> add(Item item) async => throw StateError('Storage unavailable');
 }
 
+class FailingClearDraftRepository extends DraftRepository {
+  int clearCalls = 0;
+
+  @override
+  Future<void> clear() async {
+    clearCalls++;
+    throw StateError('Draft storage unavailable');
+  }
+}
+
+class FailingSaveDraftRepository extends DraftRepository {
+  int saveCalls = 0;
+
+  @override
+  Future<void> save(Draft draft) async {
+    saveCalls++;
+    throw StateError('Draft storage unavailable');
+  }
+}
+
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  testWidgets('draft clear failure still saves the item exactly once', (
+    tester,
+  ) async {
+    final drafts = FailingClearDraftRepository();
+    await tester.pumpWidget(
+      ItemsApp(repository: ItemsRepository(), draftRepository: drafts),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('New item'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Title'),
+      'Saved',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Body'),
+      'Saved body',
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save item'));
+    await tester.pumpAndSettle();
+
+    expect(drafts.clearCalls, 1);
+    expect(find.byType(TextFormField), findsNothing);
+    expect(find.text('Items'), findsOneWidget);
+    expect(find.text('Saved'), findsOneWidget);
+    expect(
+      find.text('Could not save your item. Please try again.'),
+      findsNothing,
+    );
+    final stored = await ItemsRepository().load();
+    expect(stored, hasLength(1));
+    expect(stored.single.title, 'Saved');
+    expect(stored.single.body, 'Saved body');
+  });
+
+  testWidgets('draft write failures allow typing and saving the item', (
+    tester,
+  ) async {
+    final drafts = FailingSaveDraftRepository();
+    await tester.pumpWidget(
+      ItemsApp(repository: ItemsRepository(), draftRepository: drafts),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('New item'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Title'),
+      'First',
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Title'),
+      'Saved',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Body'),
+      'Saved body',
+    );
+    await tester.pumpAndSettle();
+
+    expect(drafts.saveCalls, greaterThanOrEqualTo(3));
+    expect(find.text('Saved'), findsOneWidget);
+    expect(find.text('Saved body'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.text('Save item'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(TextFormField), findsNothing);
+    expect(find.text('Items'), findsOneWidget);
+    expect(find.text('Saved'), findsOneWidget);
+    expect(
+      find.text('Could not save your item. Please try again.'),
+      findsNothing,
+    );
+    final stored = await ItemsRepository().load();
+    expect(stored, hasLength(1));
+    expect(stored.single.title, 'Saved');
+    expect(stored.single.body, 'Saved body');
+  });
 
   testWidgets('restores raw draft after restart and back returns to list', (
     tester,

@@ -7,11 +7,11 @@ import 'compose_screen.dart';
 import 'item_detail_screen.dart';
 
 class ItemsScreen extends StatefulWidget {
-  ItemsScreen({
+  const ItemsScreen({
     super.key,
     required this.repository,
-    DraftRepository? draftRepository,
-  }) : draftRepository = draftRepository ?? DraftRepository();
+    required this.draftRepository,
+  });
 
   final ItemsRepository repository;
   final DraftRepository draftRepository;
@@ -39,14 +39,14 @@ class _ItemsScreenState extends State<ItemsScreen> {
 
   Future<void> _restoreDraft() async {
     final draft = await widget.draftRepository.load();
-    if (mounted && draft != null) await _compose();
+    if (mounted && draft != null) await _compose(draft);
   }
 
-  Future<void> _compose() async {
+  Future<void> _compose([Draft? initialDraft]) async {
     if (_openingCompose) return;
     _openingCompose = true;
     try {
-      final draft = await widget.draftRepository.load();
+      final draft = initialDraft ?? await widget.draftRepository.load();
       if (!mounted) return;
       final saved = await Navigator.of(context).push<bool>(
         MaterialPageRoute(
