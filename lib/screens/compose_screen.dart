@@ -5,12 +5,12 @@ import '../data/draft_repository.dart';
 import '../models/item.dart';
 
 class ComposeScreen extends StatefulWidget {
-  ComposeScreen({
+  const ComposeScreen({
     super.key,
     required this.repository,
-    DraftRepository? draftRepository,
+    required this.draftRepository,
     this.initialDraft,
-  }) : draftRepository = draftRepository ?? DraftRepository();
+  });
 
   final ItemsRepository repository;
   final DraftRepository draftRepository;

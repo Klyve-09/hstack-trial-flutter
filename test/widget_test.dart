@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:items/data/items_repository.dart';
@@ -192,9 +194,22 @@ void main() {
     await tester.pageBack();
     await tester.pumpAndSettle();
     expect(await ItemsRepository().load(), isEmpty);
+    final preferences = await SharedPreferences.getInstance();
+    expect(preferences.containsKey(DraftRepository.storageKey), isFalse);
+    expect(find.text('Items'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpWidget(ItemsApp(repository: ItemsRepository()));
+    await tester.pumpAndSettle();
+    expect(find.text('Items'), findsOneWidget);
+    expect(find.byType(TextFormField), findsNothing);
     await tester.tap(find.text('New item'));
     await tester.pumpAndSettle();
     expect(find.text('Unsaved'), findsNothing);
+    for (final field in tester.widgetList<TextFormField>(
+      find.byType(TextFormField),
+    )) {
+      expect(field.controller!.text, isEmpty);
+    }
   });
 
   testWidgets('a save failure keeps entered text available for retry', (
@@ -219,10 +234,22 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Keep me'), findsOneWidget);
+    expect(find.text('Keep this text'), findsOneWidget);
+    final preferences = await SharedPreferences.getInstance();
+    expect(jsonDecode(preferences.getString(DraftRepository.storageKey)!), {
+      'title': 'Keep me',
+      'body': 'Keep this text',
+    });
     expect(
       tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
       isNotNull,
     );
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpWidget(ItemsApp(repository: FailingRepository()));
+    await tester.pumpAndSettle();
+    expect(find.byType(TextFormField), findsNWidgets(2));
+    expect(find.text('Keep me'), findsOneWidget);
+    expect(find.text('Keep this text'), findsOneWidget);
   });
 
   testWidgets('load failure offers retry without replacing stored data', (
