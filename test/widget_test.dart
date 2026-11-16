@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:items/data/items_repository.dart';
+import 'package:items/data/draft_repository.dart';
 import 'package:items/main.dart';
 import 'package:items/models/item.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -12,6 +13,136 @@ class FailingRepository extends ItemsRepository {
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  testWidgets('restores raw draft after restart and back returns to list', (
+    tester,
+  ) async {
+    await tester.pumpWidget(ItemsApp(repository: ItemsRepository()));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('New item'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Title'),
+      '  Draft  ',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Body'),
+      'Body\ntext ',
+    );
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpWidget(ItemsApp(repository: ItemsRepository()));
+    await tester.pumpAndSettle();
+    expect(find.byType(TextFormField), findsNWidgets(2));
+    expect(find.text('  Draft  '), findsOneWidget);
+    expect(find.text('Body\ntext '), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.text('Items'), findsOneWidget);
+    expect(find.byType(TextFormField), findsNothing);
+  });
+
+  testWidgets(
+    'saving a restored draft reloads list and clears it for restart',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({
+        DraftRepository.storageKey: '{"title":"Restored","body":"Saved body"}',
+      });
+      await tester.pumpWidget(ItemsApp(repository: ItemsRepository()));
+      await tester.pumpAndSettle();
+      expect(find.text('Restored'), findsOneWidget);
+      await tester.tap(find.text('Save item'));
+      await tester.pumpAndSettle();
+      expect(find.byType(TextFormField), findsNothing);
+      expect(find.text('Restored'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpWidget(ItemsApp(repository: ItemsRepository()));
+      await tester.pumpAndSettle();
+      expect(find.byType(TextFormField), findsNothing);
+      expect(find.text('Restored'), findsOneWidget);
+      await tester.tap(find.text('New item'));
+      await tester.pumpAndSettle();
+      for (final field in tester.widgetList<TextFormField>(
+        find.byType(TextFormField),
+      )) {
+        expect(field.controller!.text, isEmpty);
+      }
+    },
+  );
+
+  testWidgets('deleting all draft text removes the stored draft', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({
+      DraftRepository.storageKey: '{"title":"Delete me","body":"Body"}',
+    });
+    await tester.pumpWidget(ItemsApp(repository: ItemsRepository()));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextFormField, 'Title'), '  ');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Body'), '\n ');
+    await tester.pumpAndSettle();
+    final preferences = await SharedPreferences.getInstance();
+    expect(preferences.containsKey(DraftRepository.storageKey), isFalse);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpWidget(ItemsApp(repository: ItemsRepository()));
+    await tester.pumpAndSettle();
+    expect(find.byType(TextFormField), findsNothing);
+  });
+
+  for (final unreadable in [
+    'invalid JSON',
+    '[]',
+    '{"title":4,"body":"text"}',
+    42,
+  ]) {
+    testWidgets('unreadable draft $unreadable does not block list or compose', (
+      tester,
+    ) async {
+      SharedPreferences.setMockInitialValues({
+        DraftRepository.storageKey: unreadable,
+        ItemsRepository.storageKey: '[{"title":"Existing","body":"Note","createdAt":"2026-01-01T00:00:00Z"}]',
+      });
+      await tester.pumpWidget(ItemsApp(repository: ItemsRepository()));
+      await tester.pumpAndSettle();
+      expect(find.text('Existing'), findsOneWidget);
+      await tester.tap(find.text('New item'));
+      await tester.pumpAndSettle();
+      for (final field in tester.widgetList<TextFormField>(
+        find.byType(TextFormField),
+      )) {
+        expect(field.controller!.text, isEmpty);
+      }
+    });
+  }
+
+  testWidgets('draft writes and clear preserve stored items byte for byte', (
+    tester,
+  ) async {
+    const items =
+        '[ {"title":"Existing", "body":"Note", "createdAt":"2026-01-01T00:00:00Z"} ]';
+    SharedPreferences.setMockInitialValues({ItemsRepository.storageKey: items});
+    await tester.pumpWidget(ItemsApp(repository: ItemsRepository()));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('New item'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Title'),
+      'Draft',
+    );
+    await tester.pumpAndSettle();
+    final preferences = await SharedPreferences.getInstance();
+    expect(preferences.getString(ItemsRepository.storageKey), items);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(preferences.getString(ItemsRepository.storageKey), items);
+    expect(preferences.containsKey(DraftRepository.storageKey), isFalse);
+    await tester.tap(find.text('New item'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextFormField, 'Title'), ' ');
+    await tester.pumpAndSettle();
+    expect(preferences.containsKey(DraftRepository.storageKey), isFalse);
+    expect(preferences.getString(ItemsRepository.storageKey), items);
+  });
 
   testWidgets('creates a note, opens its detail and restores it in a new app', (
     tester,
