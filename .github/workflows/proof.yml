@@ -1,0 +1,134 @@
+name: Proof
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      build-ios: ${{ steps.match.outputs.build-ios }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: match
+        name: Match changed paths against Coverage
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.event.after }}
+        shell: python3 {0}
+        run: |
+          import os
+          import re
+          import subprocess
+
+          CHECKS = ["build-ios"]
+
+
+          def glob_regex(pattern):
+              out, i = "", 0
+              while i < len(pattern):
+                  if pattern.startswith("**/", i):
+                      out, i = out + "(?:.*/)?", i + 3
+                  elif pattern.startswith("**", i):
+                      out, i = out + ".*", i + 2
+                  elif pattern[i] == "*":
+                      out, i = out + "[^/]*", i + 1
+                  else:
+                      out, i = out + re.escape(pattern[i]), i + 1
+              return re.compile(out + r"\Z")
+
+
+          def changed_paths():
+              event = os.environ.get("EVENT_NAME", "")
+              if event == "pull_request":
+                  base, head, sep = os.environ.get("PR_BASE", ""), os.environ.get("PR_HEAD", ""), "..."
+              elif event == "push":
+                  base, head, sep = os.environ.get("PUSH_BEFORE", ""), os.environ.get("PUSH_AFTER", ""), ".."
+              else:
+                  return None
+              if not base or not head or set(base) == {"0"}:
+                  return None
+              result = subprocess.run(
+                  ["git", "diff", "--name-only", "--no-renames", f"{base}{sep}{head}"],
+                  capture_output=True,
+                  text=True,
+              )
+              if result.returncode != 0:
+                  return None
+              return [line for line in result.stdout.splitlines() if line]
+
+
+          def coverage_patterns(check):
+              try:
+                  with open("docs/agents/proof.md", encoding="utf-8") as proof:
+                      text = proof.read()
+              except OSError:
+                  return None
+              patterns, in_coverage = [], False
+              for line in text.splitlines():
+                  if line.startswith("## "):
+                      in_coverage = line.strip() == "## Coverage"
+                      continue
+                  match = re.fullmatch(r"- `([^`]+)`: `([^`]+)`", line.strip())
+                  if in_coverage and match and match.group(1) == check:
+                      patterns.append(match.group(2))
+              return patterns or None
+
+
+          results = {}
+          try:
+              paths = changed_paths()
+              for check in CHECKS:
+                  patterns = coverage_patterns(check)
+                  if paths is None or patterns is None:
+                      continue
+                  regexes = [glob_regex(p) for p in patterns]
+                  results[check] = any(r.match(path) for path in paths for r in regexes)
+          except Exception as error:
+              print(f"::warning::Coverage match failed, running every check: {error}")
+              results = {}
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              for check in CHECKS:
+                  value = "true" if results.get(check, True) else "false"
+                  print(f"{check}={value}")
+                  output.write(f"{check}={value}\n")
+
+  proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the Linux desktop toolchain
+        run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev
+      - name: Install Flutter 3.50.0
+        run: |
+          git clone --depth 1 --branch 3.50.0 https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+      - run: flutter pub get
+      - run: flutter test
+      - run: flutter analyze
+      - run: dart format --set-exit-if-changed .
+      - run: flutter build linux
+
+  build-ios:
+    name: build-ios
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.build-ios == 'true') }}
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Flutter 3.50.0
+        run: |
+          git clone --depth 1 --branch 3.50.0 https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+      - run: flutter pub get
+      - run: flutter build ios --no-codesign
