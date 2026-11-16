@@ -57,7 +57,7 @@ jobs:
               if not base or not head or set(base) == {"0"}:
                   return None
               result = subprocess.run(
-                  ["git", "diff", "--name-only", f"{base}{sep}{head}"],
+                  ["git", "diff", "--name-only", "--no-renames", f"{base}{sep}{head}"],
                   capture_output=True,
                   text=True,
               )
